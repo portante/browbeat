@@ -1,0 +1,391 @@
+#!/usr/bin/env python3
+
+from __future__ import print_function
+
+import sys, os, time, re, json
+import configparser, hashlib
+import csv
+from optparse import OptionParser
+from elasticsearch import VERSION, Elasticsearch, helpers, exceptions as es_excs
+from urllib3 import exceptions as ul_excs, Timeout
+from datetime import datetime
+
+# Version of this tool, <major>.<minor>.<rev>-<build>, where:
+#
+#   major: systemic layout change to _metadata or other field structures,
+#          not backward compatible
+#   minor: backward compatible layout changes to names, etc.
+#   rev:   completely compatible changes or additions made
+#   build: identifying build number, should not represent any changes
+#
+# Started at 1.0.0-0 since we initiated this after a trial period.
+#
+_VERSION_ = "2.0.0-1"
+_NAME_ = "remap"
+
+_op_type = "create"
+
+
+_read_timeout = 30
+
+
+def tstos(ts=None):
+    return time.strftime("%Y-%m-%dT%H:%M:%S-%Z", time.localtime(ts))
+
+
+def get_hosts(config):
+    """
+    Return list of dicts (a single dict for now) -
+    that's what ES is expecting.
+    """
+    try:
+        URL = config.get('Server', 'server')
+    except configparser.NoSectionError:
+        print("Need a [Server] section with host and port defined in %s"
+              " configuration file" % (" ".join(config.__files__)),
+                file=sys.stderr)
+        return None
+    except configparser.NoOptionError:
+        host = config.get('Server', 'host')
+        port = config.get('Server', 'port')
+    else:
+        host, port = URL.rsplit(':', 1)
+    timeoutobj = Timeout(total=1200, connect=10, read=_read_timeout)
+    return [dict(host=host, port=port, timeout=timeoutobj),]
+
+
+def set_es_logging():
+    # Silence logging messages from the elasticsearch client library
+    import logging
+    try:
+        from logging import NullHandler
+    except ImportError:
+        class NullHandler(logging.Handler):
+            def handle(self, record):
+                pass
+            def emit(self, record):
+                pass
+            def createLock(self):
+                self.lock = None
+    logging.getLogger('elasticsearch').addHandler(NullHandler())
+
+
+def es_index(es, actions, dbg=0):
+    """
+    Now do the indexing specified by the actions.
+    """
+    delay = _read_timeout
+    tries = 20
+
+    beg, end = time.time(), None
+    start = beg
+    if dbg > 0:
+        print("\tbulk index (beg ts: %s) ..." % tstos(beg))
+        sys.stdout.flush()
+    while True:
+        try:
+            res = helpers.bulk(es, actions)
+        except es_excs.ConnectionError as err:
+                end = time.time()
+                if isinstance(err.info, ul_excs.ReadTimeoutError):
+                    tries -= 1
+                    if tries > 0:
+                        print("\t\tWARNING (end ts: %s, duration: %.2fs):"
+                              " read timeout, delaying %d seconds before"
+                              " retrying (%d attempts remaining)..." % (
+                                  tstos(end), end - beg, delay, tries),
+                                  file=sys.stderr)
+                        time.sleep(delay)
+                        delay *= 2
+                        beg, end = time.time(), None
+                        print("\t\tWARNING (beg ts: %s): retrying..." % (
+                            tstos(beg)), file=sys.stderr)
+                        continue
+                print("\tERROR(%s) (end ts: %s, duration: %.2fs): %s" % (
+                    _NAME_, tstos(end), end - start, err), file=sys.stderr)
+                return 1
+        except helpers.BulkIndexError as err:
+            end = time.time()
+            len_errors = len(err.errors)
+            error_idx = 0
+            lcl_successes = 0
+            lcl_duplicates = 0
+            lcl_errors = 0
+            for e in err.errors:
+                sts = e[_op_type]['status']
+                if sts not in (200, 201):
+                    if _op_type == 'create' and sts == 409:
+                        lcl_duplicates += 1
+                    else:
+                        if dbg > 8:
+                            import pdb; pdb.set_trace()
+                        print("\t\tERRORS (%d of %d): %r" % (
+                            error_idx, len_errors, e[_op_type]['error']),
+                            file=sys.stderr)
+                        lcl_errors += 1
+                else:
+                    lcl_successes += 1
+            if dbg > 0 or lcl_errors > 0:
+                print("\tdone (end ts: %s, duration: %.2fs,"
+                      " success: %d, duplicates: %d, errors: %d)" % (
+                          tstos(end), end - start, lcl_successes,
+                          lcl_duplicates, lcl_errors))
+                sys.stdout.flush()
+            elif lcl_duplicates > 0:
+                print("\tdone (end ts: %s, duration: %.2fs,"
+                      " success: %d, duplicates: %d)" % (
+                          tstos(end), end - start, lcl_successes,
+                          lcl_duplicates))
+                sys.stdout.flush()
+            return 1 if lcl_errors > 0 or lcl_duplicates > 0 else 0
+        except Exception as err:
+            end = time.time()
+            print("\tERROR(%s) (end ts: %s, duration: %.2fs): %s" % (
+                _NAME_, tstos(end), end - start, err), file=sys.stderr)
+            return 1
+        else:
+            end = time.time()
+            successes = res[0]
+            duplicates = 0
+            errors = 0
+            len_res1 = len(res[1])
+            for idx, ires in enumerate(res[1]):
+                import pdb; pdb.set_trace()
+                sts = ires[_op_type]['status']
+                if sts not in (200, 201):
+                    if _op_type == 'create' and sts == 409:
+                        duplicates += 1
+                    else:
+                        print("\t\tERROR (%d of %d): %r" % (
+                            idx, len_res1, ires[_op_type]['error']),
+                            file=sys.stderr)
+                        errors += 1
+                else:
+                    successes += 1
+            if dbg > 0 or errors > 0:
+                print("\tdone (end ts: %s, duration: %.2fs,"
+                    " success: %d, duplicates: %d, errors: %d)" % (
+                        tstos(end), end - start, successes, duplicates,
+                        errors))
+                sys.stdout.flush()
+            if errors > 0:
+                if successes > 0:
+                    modifier = "some "
+                else:
+                    modifier = ""
+                    print("\tERROR(%s) %serrors encountered during indexing" % (
+                        _NAME_, modifier), file=sys.stderr)
+                    return 1
+            break
+    return 0
+
+
+def gen_es_actions(dumpfile_name, es, bulk=True):
+    es_actions = []
+    with open(dumpfile_name, "r") as fp:
+        recs = json.load(fp)
+
+    for rec in recs:
+        # First create a generic "result" parent document
+        src = rec['_source']
+        result = {
+            "rally": {
+                "setup": src['rally_setup'],
+                "metadata": src['rally_metadata']
+            },
+            "envi": {
+                "osp_computes_number": src['environment-metadata']['environment_setup']['osp_computes_number'],
+                "osp_controllers_number": src['environment-metadata']['environment_setup']['osp_controllers_number']
+            }
+        }
+        if result['rally']['setup']['kw']['args']['network_create_args'] == {}:
+            result['rally']['setup']['kw']['args']['network_create_args'] = ""
+        # Taskid is the "foreign key" for other records below
+        taskid = result['rally']['metadata']['taskid']
+        # All other records below share the same timestamp
+        ts = result['rally']['metadata']['timestamp']
+        timestamp_struct = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S.%f")
+        # Copy timestamp field for convenience with Kibana's defaults
+        result['@timestamp'] = ts
+        index = timestamp_struct.strftime("browbeat.p-%Y.%m.%d")
+
+        if not bulk:
+            es.create(
+                index = index,
+                id = taskid,
+                doc_type = "result",
+                body = result)
+        else:
+            es_actions.append({
+                "_op_type": _op_type,
+                "_index": index,
+                "_id": taskid,
+                "_type": "result",
+                "_source": result
+                })
+
+        # Now create separate documents, per-node, for hardware and software configurations
+        hostconfigs = {}
+        for host in src['hardware-metadata']['hardware_details']:
+            hostname = host['label']
+            del host['label']
+            hostconfigs[hostname] = { "@timestamp": ts, "result": taskid, "hostname": hostname, "hardware": host, "software": None }
+        for host in src['software-metadata']['software_details']['openstack']['config']:
+            hostname = host['node_name']
+            del host['node_name']
+            hostconfigs[hostname]["software"] = host
+        # ... and now add each host for this result to the array of results
+        for hostname, val in hostconfigs.items():
+            if not bulk:
+                import pdb; pdb.set_trace()
+                es.create(
+                    index = index,
+                    doc_type = "config",
+                    body = val)
+            else:
+                es_actions.append({
+                    "_op_type": _op_type,
+                    "_index": index,
+                    "_type": "config",
+                    "_source": val
+                    })
+
+        # Make each rally_errors element its own document to be indexed
+        for rally_error in src['rally_errors']:
+            new_rally_error = {
+                "@timestamp": ts,
+                "result": taskid,
+                "action_name": rally_error['action_name'],
+                "class": rally_error['error'][0],
+                "summary": rally_error['error'][1],
+                "traceback": rally_error['error'][2]
+                }
+            if not bulk:
+                es.create(
+                    index = index,
+                    doc_type = "error",
+                    body = new_rally_error)
+            else:
+                es_actions.append({
+                    "_op_type": _op_type,
+                    "_index": index,
+                    "_type": "error",
+                    "_source": new_rally_error
+                    })
+
+        # Finally, convert the raw metrics into smaller documents for a given result
+        for rally_stat in src['rally_stats']:
+            action = rally_stat['action']
+            for val in rally_stat['Raw']:
+                stat = { "@timestamp": ts, "result": taskid, "action": action, "stat": val }
+                try:
+                    num_networks = result['rally']['setup']['kw']['args']['num_networks']
+                except KeyError:
+                    pass
+                else:
+                    stat['num_networks'] = num_networks
+                    if not bulk:
+                        es.create(
+                            index = index,
+                            doc_type = "stat",
+                            body = stat)
+                    else:
+                        es_actions.append({
+                            "_op_type": _op_type,
+                            "_index": index,
+                            "_type": "stat",
+                            "_source": stat
+                            })
+    return es_actions
+
+
+def main(args, opts):
+    if VERSION < (1, 0, 0):
+        print("At least v1.0.0 of the ElasticSearch Python client is required,"
+                " found %r" % (VERSION,), file=sys.stderr)
+        return 1
+
+    actions = []
+
+    if opts.debug:
+        dbg = int(opts.debug)
+    else:
+        dbg = 0
+
+    cfg_name = os.environ.get('ES_CONFIG_PATH')
+    if cfg_name is None:
+        print("Need ES_CONFIG_PATH environment variable defined",
+              file=sys.stderr)
+        return 1
+
+    config = configparser.ConfigParser()
+    config.read(cfg_name)
+
+    # there is one es instance for everybody, but it uses config file stuff
+    # that I don't want to expose here, so we initialize it
+    # in the first iteration of the loop, after we get the stf
+    # object (through which we get to the config stuff).
+    if dbg < 4:
+        hosts = get_hosts(config)
+        if not hosts:
+            return 1
+        es = Elasticsearch(hosts, max_retries=0)
+        set_es_logging()
+    else:
+        es = None
+
+    es_actions = gen_es_actions(args[0], es, False if dbg >= 3 else True)
+    if dbg >= 3:
+        return 0
+    if not es_actions:
+        print("No data found in %s" % args[0], file=sys.stderr)
+        return 1
+
+    if dbg >= 4:
+        # We have processed all the records.  Now we want to re-index into ES
+        import re
+
+        r = re.compile(r"\s+$", re.MULTILINE)
+
+        txt = json.dumps(es_actions, indent=4, sort_keys=True)
+        txt = r.sub("", txt)
+        if txt[-1] != '\n':
+            txt = txt + '\n'
+        sys.stdout.write(txt)
+
+    if not es:
+        return 0
+
+    return es_index(es, es_actions, dbg=dbg)
+
+
+# additional options can be added here and passed to parse_args
+# options = [
+#     make_option("-a", "--all", action="store_true", dest="all",
+#                 help="Placeholder help")
+# ]
+
+def parse_args(options=[], usage=None):
+    if usage:
+        parser = OptionParser(usage=usage)
+    else:
+        parser = OptionParser()
+    # standard options
+    parser.add_option("-C", "--config", dest="filename",
+                  help="config FILE", metavar="FILE")
+    parser.add_option("-D", "--debug", dest="debug",
+                      help="Set debugging level (0-9)")
+    # specific options
+    for o in options:
+        parser.add_option(o)
+
+    return parser.parse_args()
+
+# debug levels
+# 0 : normal operation (equivalent to no -D)
+# 1 : verbose - some informational messages
+# 2 and above : print action list to stdout and don't do any ES stuff
+if __name__ == '__main__':
+    opts, args = parse_args(usage="Usage: remap [options] <browbeat elasticdump file>...")
+    status = main(args, opts)
+    sys.exit(status)

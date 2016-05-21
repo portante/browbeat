@@ -1,0 +1,346 @@
+{
+    "template": "browbeat.p-*",
+    "mappings": {
+        "config": {
+            "properties": {
+                "@timestamp": {
+                    "format": "dateOptionalTime",
+                    "type": "date"
+                },
+                "hardware": {
+                    "properties": {
+                        "ip": {
+                            "type": "string"
+                        },
+                        "kernel": {
+                            "type": "string"
+                        },
+                        "machine_make": {
+                            "type": "string"
+                        },
+                        "num_interface": {
+                            "type": "long"
+                        },
+                        "os_name": {
+                            "type": "string"
+                        },
+                        "total_logical_cores": {
+                            "type": "long"
+                        },
+                        "total_mem": {
+                            "type": "long"
+                        }
+                    }
+                },
+                "hostname": {
+                    "index": "not_analyzed",
+                    "type": "string"
+                },
+                "result": {
+                    "index": "not_analyzed",
+                    "type": "string"
+                },
+                "software": {
+                    "properties": {
+                        "mysql": {
+                            "properties": {
+                                "openstack_mysql_file_descriptors": {
+                                    "type": "string"
+                                },
+                                "openstack_mysql_max_connections": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "neutron": {
+                            "properties": {
+                                "openstack_neutron_api_workers": {
+                                    "type": "long"
+                                },
+                                "openstack_neutron_core_plugin": {
+                                    "type": "string"
+                                },
+                                "openstack_neutron_firewall_driver": {
+                                    "type": "string"
+                                },
+                                "openstack_neutron_l3_dvr": {
+                                    "type": "boolean"
+                                },
+                                "openstack_neutron_ml2_driver": {
+                                    "type": "string"
+                                },
+                                "openstack_neutron_ovs_tunnel": {
+                                    "type": "string"
+                                },
+                                "openstack_neutron_ovsdb": {
+                                    "type": "string"
+                                },
+                                "openstack_neutron_rpc_workers": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "nova": {
+                            "properties": {
+                                "openstack_nova_api_workers": {
+                                    "type": "long"
+                                },
+                                "openstack_nova_conductor_workers": {
+                                    "type": "long"
+                                },
+                                "openstack_nova_metadata_workers": {
+                                    "type": "long"
+                                }
+                            }
+                        },
+                        "ovs": {
+                            "properties": {
+                                "openstack_ovs_version": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "rabbitmq": {
+                            "properties": {
+                                "openstack_rabbitmq_file_descriptors": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "error": {
+            "properties": {
+                "@timestamp": {
+                    "format": "dateOptionalTime",
+                    "type": "date"
+                },
+                "action_name": {
+                    "index": "not_analyzed",
+                    "type": "string"
+                },
+                "class": {
+                    "index": "not_analyzed",
+                    "type": "string"
+                },
+                "result": {
+                    "index": "not_analyzed",
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "traceback": {
+                    "type": "string"
+                }
+            }
+        },
+        "result": {
+            "properties": {
+                "@timestamp": {
+                    "format": "dateOptionalTime",
+                    "type": "date"
+                },
+                "envi": {
+                    "properties": {
+                        "osp_computes_number": {
+                            "type": "string"
+                        },
+                        "osp_controllers_number": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "rally": {
+                    "properties": {
+                        "metadata": {
+                            "properties": {
+                                "grafana": {
+                                    "properties": {
+                                        "openstack-general-system-performance": {
+                                            "type": "string"
+                                        }
+                                    }
+                                },
+                                "taskid": {
+                                    "index": "not_analyzed",
+                                    "type": "string"
+                                },
+                                "timestamp": {
+                                    "format": "dateOptionalTime",
+                                    "type": "date"
+                                },
+                                "workload": {
+                                    "properties": {
+                                        "concurrency": {
+                                            "type": "long"
+                                        },
+                                        "name": {
+                                            "type": "string"
+                                        },
+                                        "scenario": {
+                                            "type": "string"
+                                        },
+                                        "times": {
+                                            "type": "long"
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "setup": {
+                            "properties": {
+                                "kw": {
+                                    "properties": {
+                                        "args": {
+                                            "properties": {
+                                                "flavor": {
+                                                    "properties": {
+                                                        "name": {
+                                                            "type": "string"
+                                                        }
+                                                    }
+                                                },
+                                                "image": {
+                                                    "properties": {
+                                                        "name": {
+                                                            "type": "string"
+                                                        }
+                                                    }
+                                                },
+                                                "network_create_args": {
+                                                    "type": "string"
+                                                },
+                                                "num_networks": {
+                                                    "type": "long"
+                                                },
+                                                "ports_per_network": {
+                                                    "type": "long"
+                                                },
+                                                "router_create_args": {
+                                                    "type": "string"
+                                                },
+                                                "subnet_cidr_start": {
+                                                    "type": "string"
+                                                },
+                                                "subnet_create_args": {
+                                                    "type": "string"
+                                                },
+                                                "subnets_per_network": {
+                                                    "type": "long"
+                                                }
+                                            }
+                                        },
+                                        "context": {
+                                            "properties": {
+                                                "quotas": {
+                                                    "properties": {
+                                                        "neutron": {
+                                                            "properties": {
+                                                                "network": {
+                                                                    "type": "long"
+                                                                },
+                                                                "port": {
+                                                                    "type": "long"
+                                                                },
+                                                                "router": {
+                                                                    "type": "long"
+                                                                },
+                                                                "subnet": {
+                                                                    "type": "long"
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                "users": {
+                                                    "properties": {
+                                                        "project_domain": {
+                                                            "type": "string"
+                                                        },
+                                                        "resource_management_workers": {
+                                                            "type": "long"
+                                                        },
+                                                        "tenants": {
+                                                            "type": "long"
+                                                        },
+                                                        "user_domain": {
+                                                            "type": "string"
+                                                        },
+                                                        "users_per_tenant": {
+                                                            "type": "long"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        "runner": {
+                                            "properties": {
+                                                "concurrency": {
+                                                    "type": "long"
+                                                },
+                                                "times": {
+                                                    "type": "long"
+                                                },
+                                                "type": {
+                                                    "type": "string"
+                                                }
+                                            }
+                                        },
+                                        "sla": {
+                                            "properties": {
+                                                "failure_rate": {
+                                                    "properties": {
+                                                        "max": {
+                                                            "type": "long"
+                                                        }
+                                                    }
+                                                },
+                                                "max_avg_duration": {
+                                                    "type": "long"
+                                                },
+                                                "max_seconds_per_iteration": {
+                                                    "type": "long"
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                "name": {
+                                    "type": "string"
+                                },
+                                "pos": {
+                                    "type": "long"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "stat": {
+            "properties": {
+                "@timestamp": {
+                    "format": "dateOptionalTime",
+                    "type": "date"
+                },
+                "action": {
+                    "index": "not_analyzed",
+                    "type": "string"
+                },
+                "num_networks": {
+                    "type": "long"
+                },
+                "result": {
+                    "index": "not_analyzed",
+                    "type": "string"
+                },
+                "stat": {
+                    "type": "double"
+                }
+            }
+        }
+    }
+}
